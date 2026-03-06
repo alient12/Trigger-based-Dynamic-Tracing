@@ -1,0 +1,30 @@
+module trace
+
+import wyvern.collections.list
+import wyvern.io
+
+resource type Tracer
+    def startTrace(label: String): Unit
+    def stopTrace(label: String): Unit
+    def logEvent(event: String): Unit
+    def getTrace(): String
+
+def makeTracer(): Tracer
+    new
+        var buffer: String = ""
+        var active: Boolean = false
+
+        def startTrace(label: String): Unit
+            this.active = true
+            this.buffer = this.buffer + "[START:" + label + "] "
+
+        def stopTrace(label: String): Unit
+            this.active = false
+            this.buffer = this.buffer + "[STOP:" + label + "] "
+
+        def logEvent(event: String): Unit
+            if this.active
+                this.buffer = this.buffer + event + " "
+
+        def getTrace(): String
+            this.buffer

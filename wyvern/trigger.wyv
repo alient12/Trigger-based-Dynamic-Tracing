@@ -1,0 +1,42 @@
+module trigger
+
+import wyvern.collections.list
+import trace
+
+// TriggerCondition defines when a trace should be activated
+type TriggerCondition
+    def evaluate(context: String): Boolean
+
+// Trigger wraps a condition and a label used for tracing
+resource type Trigger
+    def fire(context: String): Unit
+    def getLabel(): String
+    def isActive(): Boolean
+
+def makeTrigger(label: String, condition: TriggerCondition, tracer: trace.Tracer): Trigger
+    new
+        var active: Boolean = false
+
+        def getLabel(): String
+            label
+
+        def isActive(): Boolean
+            this.active
+
+        def fire(context: String): Unit
+            val condMet: Boolean = condition.evaluate(context)
+            if condMet
+                if !this.active
+                    tracer.startTrace(label)
+                    this.active = true
+                tracer.logEvent(context)
+            else
+                if this.active
+                    tracer.stopTrace(label)
+                    this.active = false
+
+// A simple prefix-based condition
+def makePrefixCondition(prefix: String): TriggerCondition
+    new
+        def evaluate(context: String): Boolean
+            context.startsWith(prefix)

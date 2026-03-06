@@ -1,0 +1,32 @@
+module dynamicTrace
+
+import wyvern.io
+import triggerManager
+import trigger
+
+// Entry point demonstrating trigger-based dynamic tracing
+val io: wyvern.io.IO = ...
+
+val manager: triggerManager.TriggerManager = triggerManager.makeTriggerManager()
+
+// Create a trigger that activates on events starting with "net:"
+val netCondition: trigger.TriggerCondition = trigger.makePrefixCondition("net:")
+val netTrigger: trigger.Trigger =
+    trigger.makeTrigger("network", netCondition, manager.getTracer())
+manager.addTrigger(netTrigger)
+
+// Create a trigger that activates on events starting with "fs:"
+val fsCondition: trigger.TriggerCondition = trigger.makePrefixCondition("fs:")
+val fsTrigger: trigger.Trigger =
+    trigger.makeTrigger("filesystem", fsCondition, manager.getTracer())
+manager.addTrigger(fsTrigger)
+
+// Simulate a stream of events
+manager.dispatch("net:connect host=example.com")
+manager.dispatch("net:send bytes=512")
+manager.dispatch("fs:open path=/tmp/output.txt")
+manager.dispatch("net:close host=example.com")
+manager.dispatch("fs:write bytes=128")
+manager.dispatch("fs:close path=/tmp/output.txt")
+
+io.println(manager.getTracer().getTrace())

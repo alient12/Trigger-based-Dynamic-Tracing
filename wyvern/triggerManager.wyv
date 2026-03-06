@@ -1,0 +1,27 @@
+module triggerManager
+
+import wyvern.collections.list
+import trigger
+import trace
+
+// TriggerManager holds multiple triggers and dispatches events to them
+resource type TriggerManager
+    def addTrigger(t: trigger.Trigger): Unit
+    def dispatch(context: String): Unit
+    def getTracer(): trace.Tracer
+
+def makeTriggerManager(): TriggerManager
+    new
+        val tracer: trace.Tracer = trace.makeTracer()
+        var triggers: List[trigger.Trigger] = list.make()
+
+        def addTrigger(t: trigger.Trigger): Unit
+            this.triggers = this.triggers.append(t)
+
+        def dispatch(context: String): Unit
+            this.triggers.forEach(t =>
+                t.fire(context)
+            )
+
+        def getTracer(): trace.Tracer
+            this.tracer

@@ -1,0 +1,44 @@
+module eventQueue
+
+import wyvern.collections.list
+
+// Event represents a single traced event
+type Event
+    val name: String
+    val payload: String
+    val timestamp: Int
+
+// EventQueue is a FIFO queue of events for deferred processing
+resource type EventQueue
+    def enqueue(name: String, payload: String, timestamp: Int): Unit
+    def dequeue(): Option[Event]
+    def isEmpty(): Boolean
+    def size(): Int
+
+def makeEvent(n: String, p: String, t: Int): Event
+    new
+        val name: String = n
+        val payload: String = p
+        val timestamp: Int = t
+
+def makeEventQueue(): EventQueue
+    new
+        var events: List[Event] = list.make()
+
+        def enqueue(name: String, payload: String, timestamp: Int): Unit
+            val e: Event = makeEvent(name, payload, timestamp)
+            this.events = this.events.append(e)
+
+        def dequeue(): Option[Event]
+            if this.events.isEmpty()
+                none
+            else
+                val head: Event = this.events.get(0)
+                this.events = this.events.drop(1)
+                some(head)
+
+        def isEmpty(): Boolean
+            this.events.isEmpty()
+
+        def size(): Int
+            this.events.length()
