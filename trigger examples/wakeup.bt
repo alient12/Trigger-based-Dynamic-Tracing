@@ -1,0 +1,68 @@
+#!/usr/bin/env bpftrace
+
+BEGIN
+{
+  @factor = 3;
+  @warmup = 5;
+  @min_us = 50;
+  @cooldown_s = 2;
+
+  @last_sig_s = 0;    // global cooldown (u64 seconds)
+
+  printf("Per-TID runqueue latency anomaly detector\n");
+  printf("factor=%d warmup=%d min_us=%d cooldown_s=%d\n",
+         @factor, @warmup, @min_us, @cooldown_s);
+}
+
+tracepoint:sched:sched_wakeup
+{
+  @wakeup_ts[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_wakeup_new
+{
+  @wakeup_ts[args->pid] = nsecs;
+}
+
+tracepoint:sched:sched_switch
+/ @wakeup_ts[args->next_pid] /
+{
+  $tid = args->next_pid;
+
+  // keep this unsigned (nsecs is u64)
+  $lat_us = (nsecs - @wakeup_ts[$tid]) / 1000;
+  delete(@wakeup_ts[$tid]);
+
+  // cast the scalar threshold (safe: it always exists after BEGIN)
+  if ($lat_us < (uint64)@min_us) {
+    // ignore noise
+  } else {
+    // Per-TID counters/sum (do NOT cast: may be "none" on first use in your bpftrace)
+    $cnt = @cnt[$tid];
+    $sum = @sum_us[$tid];
+
+    $avg_us = ($cnt > 0) ? ($sum / $cnt) : 0;
+
+    // update per-TID running stats
+    @sum_us[$tid] = $sum + $lat_us;
+    @cnt[$tid] = $cnt + 1;
+
+    // cast only scalar params (safe)
+    if (@cnt[$tid] >= (uint64)@warmup && $avg_us > 0 &&
+        $lat_us > ($avg_us * (uint64)@factor)) {
+
+      $now_s = nsecs / 1000000000;
+      $last  = (uint64)@last_sig_s;
+
+      if ($last == 0 || ($now_s - $last) >= (uint64)@cooldown_s) {
+
+        printf("ANOMALY runqlat: tid=%d comm=%s lat_us=%llu avg_us=%llu cnt=%llu factor=%d\n",
+               $tid, args->next_comm, $lat_us, $avg_us, @cnt[$tid], @factor);
+
+        system("./signal_sender %d %d %d", $tid, $tid, 0); // action=0 (enable perf)
+        @last_sig_s = $now_s;
+      }
+    }
+  }
+}
+

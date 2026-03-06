@@ -1,0 +1,21 @@
+#!/usr/bin/env bpftrace
+
+tracepoint:syscalls:sys_enter_getpid
+{
+    @count[tid]++;
+
+    if (@count[tid] > 5000) {
+        if (nsecs - @last_signal[pid] > 5000000000ULL) {
+            printf("threshold exceeded: tid=%d count=%d\n", tid, @count[tid]);
+            system("./signal_sender %d %d %d", tid, tid, 1);
+            @last_signal[pid] = nsecs;
+            @count[tid] = 0; // reset count after signaling
+        }
+    }
+}
+
+interval:s:2
+{
+    print(@count);
+    clear(@count);
+}
