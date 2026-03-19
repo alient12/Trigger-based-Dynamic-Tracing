@@ -1,0 +1,42 @@
+BEGIN {
+    printf("Tracing mutex_test only...\n");
+}
+
+tracepoint:sched:sched_switch
+{
+    // Normalize to uint64
+    $prev = (uint64)args->prev_pid;
+
+    if (comm == "mutex_test") {
+        @is_target[(uint64)tid] = 1;
+    }
+
+    if (@is_target[$prev] && args->prev_state != 0) {
+        @sleep_start[$prev] = nsecs;
+    }
+}
+
+tracepoint:sched:sched_wakeup
+{
+    $pid = (uint64)args->pid;
+
+    if (@is_target[$pid] && @sleep_start[$pid]) {
+        $delta = (nsecs - @sleep_start[$pid]) / 1000000;
+
+        if ($delta > 1000) {
+            $now_s = nsecs / 1000000000;
+            $last  = @last_sig_s;
+
+            if ($last == 0 || ($now_s - $last) >= 30) {
+
+                printf("[mutex_test] TID %d blocked for %d ms\n",
+                   args->pid, $delta);
+
+                system("../signal_sender %d %d %d", $pid, $pid, 0); // action=0 (enable perf)
+                @last_sig_s = $now_s;
+            }
+        }
+
+        delete(@sleep_start[$pid]);
+    }
+}

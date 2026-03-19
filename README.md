@@ -128,10 +128,28 @@ gcc -O2 -Wall -Wextra -o signal_sender signal_sender.c
 ```
 
 
-## Test
+## Test 1
 
 install bpftrace
 
 ```bash
 sudo dnf install bpftrace
 ```
+
+Terminal 1:
+```bash
+sudo ./wyvern_daemon
+```
+Terminal 2:
+```bash
+cd "trigger examples"
+sudo bpftrace --unsafe thread_block.bt
+```
+Terminal 3:
+```bash
+cd "sample program"
+./mutex_test
+```
+
+## Test 2
+

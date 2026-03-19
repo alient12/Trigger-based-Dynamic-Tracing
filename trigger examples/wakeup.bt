@@ -3,11 +3,11 @@
 BEGIN
 {
   @factor = 3;
-  @warmup = 5;
+  @warmup = 50;
   @min_us = 50;
   @cooldown_s = 2;
 
-  @last_sig_s = 0;    // global cooldown (u64 seconds)
+  @last_sig_s = (uint64)0;    // global cooldown (u64 seconds)
 
   printf("Per-TID runqueue latency anomaly detector\n");
   printf("factor=%d warmup=%d min_us=%d cooldown_s=%d\n",
@@ -36,6 +36,9 @@ tracepoint:sched:sched_switch
   // cast the scalar threshold (safe: it always exists after BEGIN)
   if ($lat_us < (uint64)@min_us) {
     // ignore noise
+    if (comm == "mutex_test") {
+      printf("lat_us: %d", $lat_us);
+    }
   } else {
     // Per-TID counters/sum (do NOT cast: may be "none" on first use in your bpftrace)
     $cnt = @cnt[$tid];

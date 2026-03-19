@@ -89,12 +89,12 @@ static void on_first_attach(TargetSlot *slot, const WyvernShm *evt)
 
     switch (t) {
     case TR_PERF: {
-        // Attach perf for 60 seconds
+        // Attach perf for 30 seconds
         // For many perf setups you need privileges; if perf fails, it prints why.
-        if (start_perf_record_sched(10) == 0) {
-            slot->attached = 1;
-            slot->state = TS_RUNNING;
-            slot->running_since_ns = now_ns_monotonic();
+        if (start_perf_record_sched(30) == 0) {
+            // slot->attached = 1;
+            // slot->state = TS_RUNNING;
+            // slot->running_since_ns = now_ns_monotonic();
         } else {
             slot->attached = 0;
             slot->state = TS_UNKNOWN;
@@ -140,16 +140,16 @@ static void on_control_event(TargetSlot *slot, const WyvernShm *evt) {
 
     switch (t) {
     case TR_PERF: {
-        // Attach perf for 60 seconds
+        // Attach perf for 30 seconds
         // For many perf setups you need privileges; if perf fails, it prints why.
-        if (start_perf_record_sched(10) == 0) {
-            slot->attached = 1;
-            slot->state = TS_RUNNING;
-            slot->running_since_ns = now_ns_monotonic();
-        } else {
-            slot->attached = 0;
-            slot->state = TS_UNKNOWN;
-        }
+        // if (start_perf_record_sched(30) == 0) {
+        //     slot->attached = 1;
+        //     slot->state = TS_RUNNING;
+        //     slot->running_since_ns = now_ns_monotonic();
+        // } else {
+        //     slot->attached = 0;
+        //     slot->state = TS_UNKNOWN;
+        // }
         break;
     }
 
@@ -435,7 +435,8 @@ static int start_perf_record_sched(int duration_sec)
     }
 
     if (c == 0) {
-        execlp("perf",
+        execlp("sudo",
+               "sudo",
                "perf",
                "record",
                "-e", "sched:*",
