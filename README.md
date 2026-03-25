@@ -151,5 +151,41 @@ cd "sample program"
 ./mutex_test
 ```
 
+After recording data, use this command before openning data in TraceCompass
+```bash
+sudo chown -R $(whoami) /tmp/wyvern-kernel-trace
+```
+
+---
+<details>
+  <summary>Wyvern daemon runs these commands in background:</summary>
+
+```bash
+sudo lttng destroy wyvern-session 2>/dev/null || true
+
+sudo lttng list | grep wyvern-session || sudo lttng create wyvern-session --snapshot --output=/tmp/wyvern-kernel-trace --trace-format=ctf-1.8
+sudo lttng create wyvern-session --snapshot --output=/tmp/wyvern-kernel-trace --trace-format=ctf-1.8
+
+sudo lttng enable-channel --kernel kchan --num-subbuf=4 --subbuf-size=4M
+sudo lttng enable-event --kernel --channel=kchan --tracepoint 'sched_*'
+sudo lttng enable-event --kernel --channel=kchan --tracepoint 'irq_*'
+sudo lttng add-context --kernel --channel=kchan --type=callstack-kernel
+sudo lttng start
+```
+
+```bash
+sudo lttng snapshot record --name=wyvern-snapshot
+# sudo lttng snapshot list-output
+
+# sudo chown -R $(whoami) /tmp/wyvern-kernel-trace
+```
+
+```bash
+sudo lttng stop
+sudo lttng destroy
+```
+</details>
+
+
 ## Test 2
 

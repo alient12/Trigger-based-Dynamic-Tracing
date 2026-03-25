@@ -58,15 +58,21 @@ typedef struct {
 
 static TargetSlot g_targets[MAX_TARGETS];
 
-// function prototypes for customization points (defined later)
+// function prototypes for customization points
 
 static uint64_t now_ns_monotonic(void);
 static void die(const char *msg);
+static void ensure_sudo(void);
+static int run_cmd(const char *cmd);
 static int start_perf_record_sched(int duration_sec);
 static int wyvern_attach_so_via_ptrace_dlopen(int target_pid, const char *so_path);
 static int wyvern_control_tracer(int target_pid, int action);
+static int create_lttng_session(void);
+static int start_lttng(void);
+static int lttng_snapshot(void);
+static int stop_lttng(void);
 
-// ----- Customization points (YOU will implement later) -----
+// ----- Customization points -----
 
 // Called when we receive an event for a PID that is not attached yet.
 // Put your "attach tracer to pid" logic here.
@@ -99,6 +105,12 @@ static void on_first_attach(TargetSlot *slot, const WyvernShm *evt)
             slot->attached = 0;
             slot->state = TS_UNKNOWN;
         }
+        break;
+    }
+
+    case TR_LTTNG: {
+        slot->attached = 1;
+        slot->state = TS_RUNNING;
         break;
     }
 
@@ -153,6 +165,11 @@ static void on_control_event(TargetSlot *slot, const WyvernShm *evt) {
         break;
     }
 
+    case TR_LTTNG: {
+        lttng_snapshot();
+        break;
+    }
+
     case TR_WYVERN: {
         // Control wyvern action 1 for enable / action 2 for disable
         if (evt->action == 1) {
@@ -179,6 +196,7 @@ static void on_control_event(TargetSlot *slot, const WyvernShm *evt) {
 // ----- End customization points -----
 
 static atomic_int g_got_sig = 0;
+static volatile sig_atomic_t stop_requested = 0;
 
 static uint64_t now_ns_monotonic(void) {
     struct timespec ts;
@@ -189,6 +207,11 @@ static uint64_t now_ns_monotonic(void) {
 static void sigusr1_handler(int sig, siginfo_t *si, void *uc) {
     (void)sig; (void)si; (void)uc;
     atomic_store_explicit(&g_got_sig, 1, memory_order_relaxed);
+}
+
+static void sigint_handler(int sig) {
+    (void)sig;
+    stop_requested = 1;
 }
 
 static void die(const char *msg) {
@@ -300,18 +323,32 @@ static void apply_event_hints(TargetSlot *slot, const WyvernShm *evt) {
 }
 
 int main(void) {
+    
+    ensure_sudo();
+
     const char *shm_name = WYVERN_SHM_NAME;
 
     printf("[daemon] pid=%d shm=%s\n", getpid(), shm_name);
     fflush(stdout);
 
-    // Install signal handler
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = sigusr1_handler;
-    sa.sa_flags = SA_SIGINFO | SA_RESTART;
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGUSR1, &sa, NULL) != 0) die("sigaction(SIGUSR1) failed");
+    // Install signal handlers
+    // SIGUSR1
+    struct sigaction sa_usr1;
+    memset(&sa_usr1, 0, sizeof(sa_usr1));
+    sa_usr1.sa_sigaction = sigusr1_handler;
+    sa_usr1.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigemptyset(&sa_usr1.sa_mask);
+    if (sigaction(SIGUSR1, &sa_usr1, NULL) != 0)
+        die("sigaction(SIGUSR1) failed");
+
+    // SIGINT (Ctrl+C)
+    struct sigaction sa_int;
+    memset(&sa_int, 0, sizeof(sa_int));
+    sa_int.sa_handler = sigint_handler;   // simpler handler
+    sa_int.sa_flags = SA_RESTART;
+    sigemptyset(&sa_int.sa_mask);
+    if (sigaction(SIGINT, &sa_int, NULL) != 0)
+        die("sigaction(SIGINT) failed");
 
     // Map shm
     // Choose perms. For “root daemon + root sender”, 0600 is fine.
@@ -337,8 +374,17 @@ int main(void) {
 
     uint64_t last_seq = 0;
 
+    create_lttng_session();
+    start_lttng();
+
     for (;;) {
         pause();
+
+        if (stop_requested) {
+            printf("[daemon] SIGINT received, shutting down...\n");
+            stop_lttng();
+            break;
+        }
 
         if (!atomic_exchange_explicit(&g_got_sig, 0, memory_order_relaxed))
             continue;
@@ -375,7 +421,7 @@ int main(void) {
 
         if (evt.tracer_type == TR_NONE) {
             if (evt.action == 0) {
-                evt.tracer_type = TR_PERF;
+                evt.tracer_type = TR_LTTNG;
             }
             else if (evt.action == 1 || evt.action == 2) {
                 evt.tracer_type = TR_WYVERN;
@@ -407,6 +453,44 @@ int main(void) {
 
     // unreachable in this POC
     munmap(shm, sizeof(*shm));
+    return 0;
+}
+
+static void ensure_sudo(void)
+{
+    if (geteuid() != 0) {
+        fprintf(stderr, "[daemon] This program must be run with sudo.\n");
+        fprintf(stderr, "Try: sudo %s\n", program_invocation_name);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static int run_cmd(const char *cmd)
+{
+    pid_t c = fork();
+    int status;
+
+    if (c < 0) {
+        perror("fork");
+        return -1;
+    }
+
+    if (c == 0) {
+        execlp("sh", "sh", "-c", cmd, (char *)NULL);
+        perror("exec(sh)");
+        _exit(127);
+    }
+
+    if (waitpid(c, &status, 0) < 0) {
+        perror("waitpid");
+        return -1;
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "[daemon] command failed: %s\n", cmd);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -499,5 +583,94 @@ static int wyvern_control_tracer(int target_pid, int action)
 }
 
 // ----- end wyvern tracer functions -----
+
+// ----- lttng functions -----
+
+static int create_lttng_session(void)
+{
+    // destroy (ignore errors)
+    if (run_cmd("sudo lttng destroy wyvern-session 2>/dev/null || true") < 0) {
+        fprintf(stderr, "[daemon] warning: failed to destroy existing session\n");
+    }
+
+    // create snapshot session
+    if (run_cmd("sudo lttng create wyvern-session --snapshot "
+                "--output=/tmp/wyvern-kernel-trace --trace-format=ctf-1.8") < 0) {
+        fprintf(stderr, "[daemon] failed to create LTTng session\n");
+        return -1;
+    }
+
+    printf("[daemon] LTTng session created: wyvern-session\n");
+    return 0;
+}
+
+static int start_lttng(void)
+{
+    if (run_cmd("sudo lttng enable-channel --kernel kchan --num-subbuf=4 --subbuf-size=4M") < 0)
+        return -1;
+
+    if (run_cmd("sudo lttng enable-event --kernel --channel=kchan --tracepoint 'sched_*'") < 0)
+        return -1;
+
+    if (run_cmd("sudo lttng enable-event --kernel --channel=kchan --tracepoint 'irq_*'") < 0)
+        return -1;
+
+    if (run_cmd("sudo lttng add-context --kernel --channel=kchan --type=callstack-kernel") < 0)
+        return -1;
+
+    if (run_cmd("sudo lttng start") < 0)
+        return -1;
+
+    printf("[daemon] LTTng tracing started successfully\n");
+    return 0;
+}
+
+static int lttng_snapshot(void)
+{
+    pid_t c = fork();
+
+    if (c < 0) {
+        perror("fork(lttng_snapshot)");
+        return -1;
+    }
+
+    if (c == 0) {
+        // child process: run sequence
+
+        printf("[daemon] recording immediate snapshot\n");
+        if (run_cmd("sudo lttng snapshot record --name=wyvern-snapshot-before") < 0)
+            _exit(1);
+        
+        for (int i = 60; i > 0; --i) {
+            printf("\r[daemon] waiting %2d seconds... ", i);
+            fflush(stdout);
+            sleep(1);
+        }
+        printf("\n");
+
+        printf("[daemon] recording post-monitor snapshot\n");
+        if (run_cmd("sudo lttng snapshot record --name=wyvern-snapshot-60s-monitor") < 0)
+            _exit(1);
+
+        _exit(0);
+    }
+
+    // parent returns immediately (non-blocking)
+    printf("[daemon] LTTng snapshot sequence started (before + 60s)\n");
+    return 0;
+}
+
+static int stop_lttng(void)
+{
+    if (run_cmd("sudo lttng stop 2>/dev/null || true") < 0) {
+        fprintf(stderr, "[daemon] warning: failed to stop LTTng\n");
+        return -1;
+    }
+
+    printf("[daemon] LTTng stopped\n");
+    return 0;
+}
+
+// ----- end lttng functions -----
 
 // gcc -O2 -Wall -Wextra -o wyvern_daemon wyvern_daemon.c
