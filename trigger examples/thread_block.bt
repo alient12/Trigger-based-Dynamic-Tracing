@@ -32,7 +32,7 @@ tracepoint:sched:sched_wakeup
                 printf("[mutex_test] TID %d blocked for %d ms\n",
                    args->pid, $delta);
 
-                system("../signal_sender %d %d %d", $pid, $pid, 0); // action=0 (enable perf)
+                system("../signal_sender %d %d %d >/tmp/signal_sender.out 2>/tmp/signal_sender.err", $pid, $pid, 0); // action=0 (enable perf)
                 @last_sig_s = $now_s;
             }
         }
