@@ -71,6 +71,8 @@ static int create_lttng_session(void);
 static int start_lttng(void);
 static int lttng_snapshot(void);
 static int stop_lttng(void);
+static int lttng_ust_record(void);
+static int lttng_ust_stop(void);
 
 // ----- Customization points -----
 
@@ -323,7 +325,7 @@ static void apply_event_hints(TargetSlot *slot, const WyvernShm *evt) {
 }
 
 int main(void) {
-    
+
     ensure_sudo();
 
     const char *shm_name = WYVERN_SHM_NAME;
@@ -376,6 +378,7 @@ int main(void) {
 
     create_lttng_session();
     start_lttng();
+    lttng_ust_record();
 
     for (;;) {
         pause();
@@ -383,6 +386,7 @@ int main(void) {
         if (stop_requested) {
             printf("[daemon] SIGINT received, shutting down...\n");
             stop_lttng();
+            lttng_ust_stop();
             break;
         }
 
@@ -600,27 +604,42 @@ static int create_lttng_session(void)
         return -1;
     }
 
-    printf("[daemon] LTTng session created: wyvern-session\n");
+    // destroy (ignore errors)
+    if (run_cmd("sudo lttng destroy wyvern-session-ust 2>/dev/null || true") < 0) {
+        fprintf(stderr, "[daemon] warning: failed to destroy existing session\n");
+    }
+
+    // create snapshot session
+    if (run_cmd("sudo lttng create wyvern-session-ust "
+                "--output=/tmp/wyvern-ust-trace --trace-format=ctf-1.8") < 0) {
+        fprintf(stderr, "[daemon] failed to create LTTng session\n");
+        return -1;
+    }
+
+    printf("[daemon] LTTng sessions created: wyvern-session wyvern-session-ust\n");
     return 0;
 }
 
 static int start_lttng(void)
 {
-    if (run_cmd("sudo lttng enable-channel --kernel kchan --num-subbuf=4 --subbuf-size=4M") < 0)
+    if (run_cmd("sudo lttng enable-channel --session=wyvern-session --kernel kchan --num-subbuf=4 --subbuf-size=4M") < 0)
         return -1;
 
-    if (run_cmd("sudo lttng enable-event --kernel --channel=kchan --tracepoint 'sched_*'") < 0)
+    if (run_cmd("sudo lttng enable-event --session=wyvern-session --kernel --channel=kchan --tracepoint 'sched_*'") < 0)
         return -1;
 
-    if (run_cmd("sudo lttng enable-event --kernel --channel=kchan --tracepoint 'irq_*'") < 0)
+    if (run_cmd("sudo lttng enable-event --session=wyvern-session --kernel --channel=kchan --tracepoint 'irq_*'") < 0)
         return -1;
 
-    if (run_cmd("sudo lttng add-context --kernel --channel=kchan --type=callstack-kernel") < 0)
+    if (run_cmd("sudo lttng add-context --session=wyvern-session --kernel --channel=kchan --type=callstack-kernel") < 0)
         return -1;
 
-    if (run_cmd("sudo lttng start") < 0)
+    if (run_cmd("sudo lttng start wyvern-session") < 0)
         return -1;
 
+    if (run_cmd("sudo lttng enable-event --session=wyvern-session-ust -u --channel=uchan wyvern:probe2") < 0)
+        return -1;
+    
     printf("[daemon] LTTng tracing started successfully\n");
     return 0;
 }
@@ -638,7 +657,7 @@ static int lttng_snapshot(void)
         // child process: run sequence
 
         printf("[daemon] recording immediate snapshot\n");
-        if (run_cmd("sudo lttng snapshot record --name=wyvern-snapshot-before") < 0)
+        if (run_cmd("sudo lttng snapshot record --session=wyvern-session --name=wyvern-snapshot-before") < 0)
             _exit(1);
         
         for (int i = 60; i > 0; --i) {
@@ -649,7 +668,7 @@ static int lttng_snapshot(void)
         printf("\n");
 
         printf("[daemon] recording post-monitor snapshot\n");
-        if (run_cmd("sudo lttng snapshot record --name=wyvern-snapshot-60s-monitor") < 0)
+        if (run_cmd("sudo lttng snapshot record --session=wyvern-session --name=wyvern-snapshot-60s-monitor") < 0)
             _exit(1);
 
         _exit(0);
@@ -662,12 +681,34 @@ static int lttng_snapshot(void)
 
 static int stop_lttng(void)
 {
-    if (run_cmd("sudo lttng stop 2>/dev/null || true") < 0) {
+    if (run_cmd("sudo lttng stop wyvern-session 2>/dev/null || true") < 0) {
         fprintf(stderr, "[daemon] warning: failed to stop LTTng\n");
         return -1;
     }
 
     printf("[daemon] LTTng stopped\n");
+    return 0;
+}
+
+static int lttng_ust_record(void)
+{
+
+    if (run_cmd("sudo lttng start wyvern-session-ust") < 0)
+        return -1;
+    
+    printf("[daemon] Wyvern UST tracing started successfully\n");
+    return 0;
+}
+
+static int lttng_ust_stop(void)
+{
+
+    if (run_cmd("sudo lttng stop wyvern-session-ust 2>/dev/null || true") < 0) {
+        fprintf(stderr, "[daemon] warning: failed to stop LTTng UST\n");
+        return -1;
+    }
+    
+    printf("[daemon] Wyvern UST tracing stopped successfully\n");
     return 0;
 }
 
