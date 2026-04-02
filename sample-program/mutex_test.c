@@ -91,4 +91,4 @@ int main() {
 }
 
 
-// gcc -O2 -Wall -Wextra -o mutex_test mutex_test.c -lpthread
+// gcc -O0 -Wall -Wextra -o mutex_test mutex_test.c -lpthread

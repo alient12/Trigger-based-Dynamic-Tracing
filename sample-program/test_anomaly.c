@@ -166,4 +166,4 @@ int main(int argc, char **argv) {
     }
 }
 
-// gcc -O2 -g -fPIE -pie -pthread -o test_anomaly test_anomaly.c
+// gcc -O0 -g -fPIE -pie -pthread -o test_anomaly test_anomaly.c

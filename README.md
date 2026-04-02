@@ -142,12 +142,12 @@ sudo ./wyvern_daemon
 ```
 Terminal 2:
 ```bash
-cd "trigger examples"
+cd trigger-examples
 sudo bpftrace --unsafe thread_block.bt
 ```
 Terminal 3:
 ```bash
-cd "sample program"
+cd sample-program
 ./mutex_test
 ```
 
