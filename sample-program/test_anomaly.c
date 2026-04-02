@@ -30,15 +30,23 @@ static void pin_to_cpu(int cpu) {
     }
 }
 
+static void normal_work(void) {
+    for (volatile int i = 0; i < 1000; i++) {
+        int x = i * i; (void)x; // burn some CPU cycles
+    }
+}
+
+static long call_get_pid(void) {
+    return syscall(SYS_getpid);
+}
+
 static void busy_work_us(int us) {
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
     long long target_ns = (long long)us * 1000LL;
 
     for (;;) {
-        for (volatile int i = 0; i < 1000; i++) {
-            int x = i * i; (void)x; // burn some CPU cycles
-        }
+        normal_work();
         if ((rand() & 0x3F) == 0) sched_yield();
 
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -78,7 +86,7 @@ static void *hog_thread(void *arg) {
         // call getpid() 10000 times to generate syscalls and some scheduler activity
         volatile long sink;
         for (int i = 0; i < 10000; i++) {
-            sink = syscall(SYS_getpid);
+            sink = call_get_pid();
         }
         
         // Burn CPU while on
@@ -166,4 +174,4 @@ int main(int argc, char **argv) {
     }
 }
 
-// gcc -O0 -g -fPIE -pie -pthread -o test_anomaly test_anomaly.c
+// gcc -O0 -pthread -fPIE -pie -o test_anomaly test_anomaly.c
