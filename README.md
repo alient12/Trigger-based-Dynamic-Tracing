@@ -4,13 +4,14 @@
 ## Installing Dependencies
 
 You should have the following libraries installed:
-capstone, libpatch, yaml, libdawrf, llttng-ust
+capstone, libpatch, yaml, libdawrf, cjson, llttng-ust
 
 Fedora/RHEL:
 ```bash
 sudo dnf install capstone-devel
 sudo dnf install libyaml-devel
 sudo dnf install libdwarf-devel
+sudo dnf install cjson-devel
 # libpatch dependencies
 sudo dnf install guile30
 sudo dnf install elfutils-devel
@@ -26,7 +27,8 @@ Ubuntu:
 ```bash
 sudo apt install libcapstone-dev
 sudo apt install libyaml-dev
-sudo dnf install libdwarf-dev
+sudo apt install libdwarf-dev
+sudo apt install libcjson-dev
 # libpatch dependencies
 sudo apt install guile-3.0
 sudo apt install libdw-dev
@@ -149,6 +151,10 @@ Terminal 3:
 ```bash
 cd sample-program
 ./mutex_test
+```
+or using taskset for cpu isolation (real isolation requires changing boot cmd)
+```bash
+sudo taskset -c 7 chrt -f 99 ./mutex_test
 ```
 
 After recording data, use this command before openning data in TraceCompass
